@@ -1,7 +1,7 @@
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " myquesta is a script that searches for the nearest vunit run.py to the
 " file given as argument. Then vunit is executed with questa.
-setlocal makeprg=myquesta\ %f
+setlocal makeprg=myquesta\ %
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " The errorformat of modelsim/questa
 setlocal errorformat=**\ Error:\ %f(%l):\ %m,**\ Warning:\ %f(%l):\ %m
@@ -25,9 +25,13 @@ command! VhdlCopyEntity call VhdlCopyEntityInBuffer()
 command! VhdlPasteInstance call VhdlPasteAsInstance()
 command! VhdlPasteSignals call VhdlPasteAsSignals()
 command! VhdlInsertInstanceFromTag call VhdlInsertInstanceFromTag()
+command! VhdlRunTestWithFzf call VhdlRunTestWithFzf(0)
+command! VhdlRunTestWithFzfInGui call VhdlRunTestWithFzf(1)
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Key mappings
 nnoremap <leader>i :VhdlInsertInstanceFromTag<CR>
+nnoremap <leader>t :VhdlRunTestWithFzf<CR>
+nnoremap <leader>gt :VhdlRunTestWithFzfInGui<CR>
 map <F12> :VhdlUpdateSensitivityList<CR>
 map <F11> :VhdlBeautify<CR>
 
@@ -63,26 +67,33 @@ function! VhdlCopyEntity(entity_by_line)
   " remove comments
   call map(a:entity_by_line, {_, val -> substitute(val,'\s*--.*$','','g')})
 
+  " create a string containing the entity and normalize whitespaces
   let l:entity = join(a:entity_by_line)
   let l:entity = substitute(entity,'\s\{2,}',' ','g') " replace multiple whitespaces by one whitespace
   let l:entity = substitute(entity,'\s',' ','g') " replace singel whithespace character by actual ' '
 
-  let g:vhdl_entity = {}
+  let g:vhdl_entity = {'name': '', 'generics': [], 'ports': []}
   let g:vhdl_entity['name'] = substitute(entity,'.*entity\s\+\(\w*\)\s\+is.*', '\1', 'g')
 
+  if match(entity,  '.*generic\s*(\(.\{-}\))\s*;\s*port.*') != -1
+    let l:generic = substitute(entity,  '.*generic\s*(\(.\{-}\))\s*;\s*port.*', '\1', 'g')
+    let l:generic = substitute(generic, ':=', ':', 'g')
+    let s:generics = split(l:generic, ';')
+    let g:vhdl_entity['generics'] = map(s:generics, {_, val -> map(split(val,":"), {_,v -> trim(v)})})
+  endif
 
-  let l:generic = substitute(entity,  '.*generic\s*(\(.\{-}\))\s*;\s*port.*', '\1', 'g')
-  let l:generic = substitute(generic, ':=', ':', 'g')
-  let s:generics = split(l:generic, ';')
-  let g:vhdl_entity['generics'] = map(s:generics, {_, val -> map(split(val,":"), {_,v -> trim(v)})})
-
-  let l:port = substitute(entity, '.*port\s*(\(.\{-}\))\s*;\s*' . g:entity_end_regex, '\1', 'g')
-  let l:port = substitute(port, '\s*\(\<in\>\|\<out\>\)\s*', ' \1:', 'g')
-  let l:port = substitute(port, ':=', ':', 'g')
-  let s:ports = split(l:port, ';')
-  let g:vhdl_entity['ports'] = map(s:ports, {_, val -> map(split(val,":"), {_,v -> trim(v)})})
+  if match(entity, '.*port\s*(\(.\{-}\))\s*;\s*') != -1
+    echomsg l:entity
+    let l:port = substitute(entity, '.*port\s*(\(.\{-}\))\s*;\s*end\(\s\+entity\s*\)\?;', '\1', 'g')
+    echomsg l:port
+    let l:port = substitute(port, '\s*\(\<in\>\|\<out\>\)\s*', ' \1:', 'g')
+    let l:port = substitute(port, ':=', ':', 'g')
+    let s:ports = split(l:port, ';')
+    let g:vhdl_entity['ports'] = map(s:ports, {_, val -> map(split(val,":"), {_,v -> trim(v)})})
+  endif
 
   echomsg "Copied entity " . g:vhdl_entity['name']
+  echomsg "Generics " . join(g:vhdl_entity['generics'])
 endfunction
 
 
@@ -147,14 +158,10 @@ endfunction
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Requirements:
 " This requires ctags-exuberant to be installed
-function! VhdlGetTags()
-  if empty(tagfiles())
-    echohl WarningMsg
-    echom 'Preparing tags'
-    echohl None
-    call system('ctags-exuberant -R --languages=VHDL --fields="+Kn"')
-  endif
+function! VhdlUpdateCtags()
+    call jobstart(['ctags-exuberant','-R', '--languages=VHDL', '--fields="+Kn"', '--VHDL-kinds="+lfp"'])
 endfunction
+autocmd BufEnter,BufWritePost * call VhdlUpdateCtags()
 
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -163,7 +170,6 @@ endfunction
 " <entity_name_as_string> <line nr> <filename>
 function! VhdlInsertInstanceFromTagSink(line)
   let line_list = split(a:line, " ")
-  echomsg a:line
   let file_by_line = readfile(line_list[2])
   let entity_by_line = file_by_line[line_list[1]-1:-1]
   let end_index = match(entity_by_line, g:entity_end_regex)
@@ -184,14 +190,13 @@ endfunction
 "    and inserts it as instance.
 function! VhdlInsertInstanceFromTag()
   if exists(":FZF")
-    call VhdlGetTags()
     let l:input = taglist('.*')
     let l:filtered_input = filter(input, {_, val -> val['kind'] =~ 'entity'})
     let l:stringified = map(filtered_input, {key, val -> val['name'] . ' ' . val['line'] . ' ' . val['filename'] })
     let l:sorted_stringified  = sort(l:stringified)
     call fzf#run({
           \ 'source': l:sorted_stringified,
-          \ 'options': '+m -d " " --with-nth 1',
+          \ 'options': '-m -d " " --with-nth 1',
           \ 'down' : '50%',
           \ 'sink': function('VhdlInsertInstanceFromTagSink')})
   endif
@@ -204,12 +209,12 @@ if exists(":Neomake")
   call neomake#configure#automake('nrwi', 10)
   let g:neomake_vhdl_myquesta_maker = {
         \ 'exe': 'myquesta',
-        \ 'args': ['%:p:h'],
+        \ 'args': ['%'],
         \ 'errorformat' : '**\ Error:\ %f(%l):\ %m,' . '**\ Warning:\ %f(%l):\ %m',
         \ }
   let g:neomake_vhdl_myghdl_maker = {
         \ 'exe': 'myghdl',
-        \ 'args' : ['%:p:h'],
+        \ 'args' : ['%'],
         \ 'errorformat' : '%f:%l:%c:\ %m',
         \ }
   let g:neomake_waring_sign = {
@@ -222,3 +227,77 @@ if exists(":Neomake")
         \ }
   let g:neomake_vhdl_enabled_makers = ['myquesta', 'myghdl']
 endif
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" One posiblity to run tests through vunit
+" This currently is project specific maybe with more projects along the way
+" this will change
+function VhdlFindRootRunPy()
+  if exists("*FindRootDirectory")
+    let l:root = FindRootDirectory()
+    let l:runpy_and_workdir = { "runpy": expand(findfile("run.py", l:root . "**")), "workdir": l:root}
+    return l:runpy_and_workdir
+  endif 
+endfunction
+
+let g:vunit_test_list=[]
+function! s:VhdlGetTestList(job_id, data, event) dict
+  if a:event == 'stdout'
+    if a:data != ['']
+      let g:vunit_test_list += a:data
+    endif
+  elseif a:event == 'stderr'
+    if a:data != ['']
+      echomsg "stderr " . join(a:data, "\r\r")
+    endif
+  else
+    call sort(g:vunit_test_list)
+    call uniq(g:vunit_test_list)
+  endif
+endfunction
+
+function VhdlUpdateTestList()
+  let l:runpy = VhdlFindRootRunPy()
+  let s:opts = {
+        \ 'on_stdout': function('s:VhdlGetTestList'),
+        \ 'on_stderr': function('s:VhdlGetTestList'),
+        \ 'on_exit'  : function('s:VhdlGetTestList'),
+        \ 'cwd'      : l:runpy["workdir"]
+        \}
+  call jobstart(['vunit',  l:runpy["runpy"], '-l'], s:opts)
+endfunction
+autocmd BufEnter,BufWritePost * call VhdlUpdateTestList()
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Parameter guimode can be 0 for non gui mode or 1 for calling questa with 
+" gui
+function VhdlRunTestWithFzf(guimode)
+  let l:list = []
+  let g:vunit_gui_mode = a:guimode 
+  if exists("g:vunit_test_list") 
+    let l:list = g:vunit_test_list
+  else
+    return
+  endif
+  if exists(":FZF")
+    call fzf#run({
+          \ 'source': l:list,
+          \ 'options': '-m -d " " --with-nth 1',
+          \ 'down' : '50%',
+          \ 'sink*': function('VhdlRunVunitTest')})
+  endif
+endfunction
+
+function VhdlRunVunitTest(tests)
+  let l:runpy = VhdlFindRootRunPy()
+  let l:command = "export $(tmux show-env | grep DISP); vunit " . l:runpy["runpy"] . " " . join(a:tests, " ") . " -o nvim"
+  if g:vunit_gui_mode == 1
+    let l:command = l:command . " -g"
+  endif
+  " reset g:vunit_gui_mode for next call
+  let g:vunit_gui_mode = 0
+  bo new | resize 15 
+  call termopen(l:command, {'cwd': l:runpy["workdir"]})
+  call cursor(100,0)
+  wincmd p
+endfunction
