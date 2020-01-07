@@ -18,7 +18,7 @@ iabbr tou to_unsigned
 " * beautify
 " * update sensitivity list
 command! VhdlUpdateSensitivityList :w|:execute "!cp % %.bak; emacs --no-site-file -batch % -f vhdl-update-sensitivity-list-buffer -f save-buffer" | :e
-command! VhdlBeautify :w|:execute "!cp % %.bak; emacs --no-site-file -batch % -f vhdl-beautify-buffer -f save-buffer" | :e
+command! VhdlBeautify :w|:silent! execute "!cp % %.bak; emacs --no-site-file -batch % -f vhdl-beautify-buffer -f save-buffer" | :e
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Commands to the functions defined in this package
 command! VhdlCopyEntity call VhdlCopyEntityInBuffer()
@@ -27,13 +27,7 @@ command! VhdlPasteSignals call VhdlPasteAsSignals()
 command! VhdlInsertInstanceFromTag call VhdlInsertInstanceFromTag()
 command! VhdlRunTestWithFzf call VhdlRunTestWithFzf(0)
 command! VhdlRunTestWithFzfInGui call VhdlRunTestWithFzf(1)
-""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Key mappings
-nnoremap <leader>i :VhdlInsertInstanceFromTag<CR>
-nnoremap <leader>t :VhdlRunTestWithFzf<CR>
-nnoremap <leader>gt :VhdlRunTestWithFzfInGui<CR>
-map <F12> :VhdlUpdateSensitivityList<CR>
-map <F11> :VhdlBeautify<CR>
+command! VhdlUpdateTestList call VhdlUpdateTestList()
 
 let g:entity_end_regex = '\<end\>'
 
@@ -84,7 +78,7 @@ function! VhdlCopyEntity(entity_by_line)
 
   if match(entity, '.*port\s*(\(.\{-}\))\s*;\s*') != -1
     echomsg l:entity
-    let l:port = substitute(entity, '.*port\s*(\(.\{-}\))\s*;\s*end\(\s\+entity\s*\)\?;', '\1', 'g')
+    let l:port = substitute(entity, '.*port\s*(\(.\{-}\))\s*;\s*end\>.*', '\1', 'g')
     echomsg l:port
     let l:port = substitute(port, '\s*\(\<in\>\|\<out\>\)\s*', ' \1:', 'g')
     let l:port = substitute(port, ':=', ':', 'g')
@@ -159,7 +153,7 @@ endfunction
 " Requirements:
 " This requires ctags-exuberant to be installed
 function! VhdlUpdateCtags()
-    call jobstart(['ctags-exuberant','-R', '--languages=VHDL', '--fields="+Kn"', '--VHDL-kinds="+lfp"'])
+    call jobstart(['ctags-exuberant','-R', '--languages=VHDL', '--fields="+Kn"'])
 endfunction
 autocmd BufEnter,BufWritePost * call VhdlUpdateCtags()
 
@@ -204,18 +198,33 @@ endfunction
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Neomake configurations only works if neomake is installed and setup
+" myquesta/myghdl is a shell script that from the given vhdl file searches 
+" for the nearest vunit/run.py and runs this with --compile
+" The sed is used as for my setup vunit is in a docker container and the git
+" repo is mounted.
+"
+"#!/bin/bash
+"
+"DIR=$(realpath $(dirname $1))
+"while [ ! -z "$DIR" ] && [ ! -f "$DIR/vunit/run.py" ]; do
+"    DIR="${DIR%\/*}"
+"done
+"vunit ${DIR}/vunit/run.py --compile -o myquesta | sed "s#/project#$(git root)#g"
+"
 if exists(":Neomake")
   autocmd! BufWritePost,BufEnter * NeomakeProject
   call neomake#configure#automake('nrwi', 10)
   let g:neomake_vhdl_myquesta_maker = {
         \ 'exe': 'myquesta',
         \ 'args': ['%'],
-        \ 'errorformat' : '**\ Error:\ %f(%l):\ %m,' . '**\ Warning:\ %f(%l):\ %m',
+        \ 'errorformat' : '**\ Error:\ %f(%l):\ %m,' .'**\ Error (suppressible):\ %f(%l):\ %m,'. '**\ Warning:\ %f(%l):\ %m',
+        \ 'append_file' : 0, 
         \ }
   let g:neomake_vhdl_myghdl_maker = {
         \ 'exe': 'myghdl',
         \ 'args' : ['%'],
         \ 'errorformat' : '%f:%l:%c:\ %m',
+        \ 'append_file' : 0, 
         \ }
   let g:neomake_waring_sign = {
         \ 'text': 'W',
@@ -266,7 +275,6 @@ function VhdlUpdateTestList()
         \}
   call jobstart(['vunit',  l:runpy["runpy"], '-l'], s:opts)
 endfunction
-autocmd BufEnter,BufWritePost * call VhdlUpdateTestList()
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Parameter guimode can be 0 for non gui mode or 1 for calling questa with 
@@ -277,7 +285,7 @@ function VhdlRunTestWithFzf(guimode)
   if exists("g:vunit_test_list") 
     let l:list = g:vunit_test_list
   else
-    return
+    return 
   endif
   if exists(":FZF")
     call fzf#run({
