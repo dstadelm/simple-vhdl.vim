@@ -28,6 +28,7 @@ command! VhdlInsertInstanceFromTag call VhdlInsertInstanceFromTag()
 command! VhdlRunTestWithFzf call VhdlRunTestWithFzf(0)
 command! VhdlRunTestWithFzfInGui call VhdlRunTestWithFzf(1)
 command! VhdlUpdateTestList call VhdlUpdateTestList()
+command! VhdlUpdateCtags call VhdlUpdateCtags()
 
 let g:entity_end_regex = '\<end\>'
 
@@ -134,7 +135,7 @@ function! VhdlPasteAsInstance()
     let generic_map = map(copy(g:vhdl_entity['generics']), {_, val -> "    " .  printf(format_string, val[0]) . " => " . val[0] . "," })
     if len(generic_map) > 0
       let generic_map[-1] = trim(generic_map[-1],',')
-      let generic_map = ["  generic map("] + generic_map + [");"]
+      let generic_map = ["  generic map("] + generic_map + [")"]
     endif
     let format_string = "%-".printf("%ds", VhdlLenLongestStr(g:vhdl_entity['ports']))
     let port_map = map(copy(g:vhdl_entity['ports']), {_, val -> "    " . printf(format_string, val[0]) . " => " . val[0] . "," })
@@ -153,7 +154,7 @@ endfunction
 " Requirements:
 " This requires ctags-exuberant to be installed
 function! VhdlUpdateCtags()
-    call jobstart(['ctags-exuberant','-R', '--languages=VHDL', '--fields="+Kn"'])
+    call jobstart(['ctags-exuberant','-R', '--languages=VHDL', '--fields="+Kn"', '--exclude="work_top"'])
 endfunction
 autocmd BufEnter,BufWritePost * call VhdlUpdateCtags()
 
@@ -212,7 +213,7 @@ endfunction
 "vunit ${DIR}/vunit/run.py --compile -o myquesta | sed "s#/project#$(git root)#g"
 "
 if exists(":Neomake")
-  autocmd! BufWritePost,BufEnter * NeomakeProject
+"  autocmd! BufWritePost,BufEnter * NeomakeProject
   call neomake#configure#automake('nrwi', 10)
   let g:neomake_vhdl_myquesta_maker = {
         \ 'exe': 'myquesta',
@@ -255,10 +256,15 @@ function! s:VhdlGetTestList(job_id, data, event) dict
     if a:data != ['']
       let g:vunit_test_list += a:data
     endif
+    call sort(g:vunit_test_list)
+    call uniq(g:vunit_test_list)
   elseif a:event == 'stderr'
     if a:data != ['']
       echomsg "stderr " . join(a:data, "\r\r")
+      let g:vunit_test_list += a:data
     endif
+    call sort(g:vunit_test_list)
+    call uniq(g:vunit_test_list)
   else
     call sort(g:vunit_test_list)
     call uniq(g:vunit_test_list)
@@ -273,7 +279,7 @@ function VhdlUpdateTestList()
         \ 'on_exit'  : function('s:VhdlGetTestList'),
         \ 'cwd'      : l:runpy["workdir"]
         \}
-  call jobstart(['vunit',  l:runpy["runpy"], '-l'], s:opts)
+  call jobstart(['vunit',  l:runpy["runpy"], '-l', '--log-level', 'error'], s:opts)
 endfunction
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -309,3 +315,10 @@ function VhdlRunVunitTest(tests)
   call cursor(100,0)
   wincmd p
 endfunction
+
+"function GetFooText()
+"  return "Foo Text"
+"endfunction
+"
+"call airline#parts#define_function('foo', 'GetFooText')
+"let g:airline_section_y = airline#section#create_right(['foo'])
