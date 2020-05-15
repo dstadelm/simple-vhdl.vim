@@ -154,9 +154,9 @@ endfunction
 " Requirements:
 " This requires ctags-exuberant to be installed
 function! VhdlUpdateCtags()
-    call jobstart(['ctags-exuberant','-R', '--languages=VHDL', '--fields="+Kn"', '--exclude="work_top"'])
+    call jobstart(['ctags-exuberant','-R', '--languages=VHDL', '--fields="+Knl"', '--exclude=work_top'])
 endfunction
-autocmd BufEnter,BufWritePost * call VhdlUpdateCtags()
+"autocmd BufEnter,BufWritePost * call VhdlUpdateCtags()
 
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -235,7 +235,7 @@ if exists(":Neomake")
         \ 'text': 'E',
         \ 'texthl' : 'ErrorMsg',
         \ }
-  let g:neomake_vhdl_enabled_makers = ['myquesta', 'myghdl']
+  let g:neomake_vhdl_enabled_makers = ['myquesta'] ", 'myghdl']
 endif
 
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
@@ -250,7 +250,6 @@ function VhdlFindRootRunPy()
   endif 
 endfunction
 
-let g:vunit_test_list=[]
 function! s:VhdlGetTestList(job_id, data, event) dict
   if a:event == 'stdout'
     if a:data != ['']
@@ -272,6 +271,7 @@ function! s:VhdlGetTestList(job_id, data, event) dict
 endfunction
 
 function VhdlUpdateTestList()
+  let g:vunit_test_list=[]
   let l:runpy = VhdlFindRootRunPy()
   let s:opts = {
         \ 'on_stdout': function('s:VhdlGetTestList'),
