@@ -214,7 +214,7 @@ endfunction
 "
 if exists(":Neomake")
 "  autocmd! BufWritePost,BufEnter * NeomakeProject
-  call neomake#configure#automake('nrwi', 10)
+  call neomake#configure#automake('w', 10)
   let g:neomake_vhdl_myquesta_maker = {
         \ 'exe': 'myquesta',
         \ 'args': ['%'],
