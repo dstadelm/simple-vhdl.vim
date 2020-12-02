@@ -5,6 +5,8 @@ setlocal makeprg=myquesta\ %
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " The errorformat of modelsim/questa
 setlocal errorformat=**\ Error:\ %f(%l):\ %m,**\ Warning:\ %f(%l):\ %m
+" Riviera error format
+"setlocal errorformat=%.%#\ ERROR\ %.%#\ "%m"\ "%f"\ %l\ %c%.%#,%.%#\ WARNING\ %.%#\ "%m"\ "%f"\ %l\ %c%.%#
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Abbreviations in insert mode
 iabbr ,, <=
@@ -29,6 +31,8 @@ command! VhdlRunTestWithFzf call VhdlRunTestWithFzf(0)
 command! VhdlRunTestWithFzfInGui call VhdlRunTestWithFzf(1)
 command! VhdlUpdateTestList call VhdlUpdateTestList()
 command! VhdlUpdateCtags call VhdlUpdateCtags()
+command! VhdlReRunSelectedTests call VhdlReRunSelectedTests()
+
 
 let g:entity_end_regex = '\<end\>'
 
@@ -197,6 +201,18 @@ function! VhdlInsertInstanceFromTag()
   endif
 endfunction
 
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" One posiblity to run tests through vunit
+" This currently is project specific maybe with more projects along the way
+" this will change
+function VhdlFindRootRunPy()
+  if exists("*FindRootDirectory")
+    let l:root = FindRootDirectory()
+    let l:runpy_and_workdir = { "runpy": expand(findfile("run.py", l:root . "**")), "workdir": l:root}
+    return l:runpy_and_workdir
+  endif 
+endfunction
+
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Neomake configurations only works if neomake is installed and setup
 " myquesta/myghdl is a shell script that from the given vhdl file searches 
@@ -214,7 +230,16 @@ endfunction
 "
 if exists(":Neomake")
 "  autocmd! BufWritePost,BufEnter * NeomakeProject
+  " let g:neomake_verbose = 3
   call neomake#configure#automake('w', 10)
+  let g:vhdl_runpy = VhdlFindRootRunPy()
+  let g:neomake_vhdl_riviera_maker = {
+        \ 'exe': 'python',
+        \ 'args': [g:vhdl_runpy["runpy"], '--compile', '-m', 'cnn2_lib.*'],
+        \ 'errorformat' : '%.%#\ ERROR\ %.%#\ "%m"\ "%f"\ %l\ %c%.%#,' . '%.%#\ WARNING\ %.%#\ "%m"\ "%f"\ %l\ %c%.%#',
+        \ 'append_file' : 0,
+        \ 'cwd' : g:vhdl_runpy["workdir"]
+        \}
   let g:neomake_vhdl_myquesta_maker = {
         \ 'exe': 'myquesta',
         \ 'args': ['%'],
@@ -238,16 +263,16 @@ if exists(":Neomake")
   let g:neomake_vhdl_enabled_makers = ['myquesta'] ", 'myghdl']
 endif
 
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" One posiblity to run tests through vunit
-" This currently is project specific maybe with more projects along the way
-" this will change
-function VhdlFindRootRunPy()
-  if exists("*FindRootDirectory")
-    let l:root = FindRootDirectory()
-    let l:runpy_and_workdir = { "runpy": expand(findfile("run.py", l:root . "**")), "workdir": l:root}
-    return l:runpy_and_workdir
-  endif 
+function StarFunc(depth, key, testname)
+  let l:the_split = split(a:testname,'\.')
+  let l:the_items = l:the_split[0:(a:depth-1)] + ["*"]
+  return join(l:the_items, ".") 
+endfunction
+
+function! s:VhdlCreateVunitStarSelection(vunit_list)
+  let l:library = uniq(map(copy(a:vunit_list), function('StarFunc',[1])))
+  let l:testbench =  uniq(map(copy(a:vunit_list), function('StarFunc',[2])))
+  return l:library + l:testbench
 endfunction
 
 function! s:VhdlGetTestList(job_id, data, event) dict
@@ -289,7 +314,7 @@ function VhdlRunTestWithFzf(guimode)
   let l:list = []
   let g:vunit_gui_mode = a:guimode 
   if exists("g:vunit_test_list") 
-    let l:list = g:vunit_test_list
+    let l:list = g:vunit_test_list + s:VhdlCreateVunitStarSelection(g:vunit_test_list)
   else
     return 
   endif
@@ -302,9 +327,14 @@ function VhdlRunTestWithFzf(guimode)
   endif
 endfunction
 
+function VhdlReRunSelectedTests()
+  call VhdlRunVunitTest(g:VhdlSelectedTests)
+endfunction
+
 function VhdlRunVunitTest(tests)
+  let g:VhdlSelectedTests = a:tests
   let l:runpy = VhdlFindRootRunPy()
-  let l:command = "export $(tmux show-env | grep DISP); vunit " . l:runpy["runpy"] . " " . join(a:tests, " ") . " -o nvim"
+  let l:command = "export $(tmux show-env | grep DISP); vunit " . l:runpy["runpy"] . " \"" . join(a:tests, "\" ") . "\" -o nvim"
   if g:vunit_gui_mode == 1
     let l:command = l:command . " -g"
   endif
