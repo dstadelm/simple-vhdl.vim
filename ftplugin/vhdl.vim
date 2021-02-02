@@ -210,12 +210,12 @@ function VhdlFindRootRunPy()
     let l:root = FindRootDirectory()
     let l:runpy_and_workdir = { "runpy": expand(findfile("run.py", l:root . "**")), "workdir": l:root}
     return l:runpy_and_workdir
-  endif 
+  endif
 endfunction
 
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Neomake configurations only works if neomake is installed and setup
-" myquesta/myghdl is a shell script that from the given vhdl file searches 
+" myquesta/myghdl is a shell script that from the given vhdl file searches
 " for the nearest vunit/run.py and runs this with --compile
 " The sed is used as for my setup vunit is in a docker container and the git
 " repo is mounted.
@@ -244,13 +244,13 @@ if exists(":Neomake")
         \ 'exe': 'myquesta',
         \ 'args': ['%'],
         \ 'errorformat' : '**\ Error:\ %f(%l):\ %m,' .'**\ Error (suppressible):\ %f(%l):\ %m,'. '**\ Warning:\ %f(%l):\ %m',
-        \ 'append_file' : 0, 
+        \ 'append_file' : 0,
         \ }
   let g:neomake_vhdl_myghdl_maker = {
         \ 'exe': 'myghdl',
         \ 'args' : ['%'],
         \ 'errorformat' : '%f:%l:%c:\ %m',
-        \ 'append_file' : 0, 
+        \ 'append_file' : 0,
         \ }
   let g:neomake_waring_sign = {
         \ 'text': 'W',
@@ -266,13 +266,82 @@ endif
 function StarFunc(depth, key, testname)
   let l:the_split = split(a:testname,'\.')
   let l:the_items = l:the_split[0:(a:depth-1)] + ["*"]
-  return join(l:the_items, ".") 
+  return join(l:the_items, ".")
+endfunction
+
+function TestCreateTestDict()
+  let l:ts = "library.test_bench.test_case.use_case"
+  let l:test_dict = {}
+  call s:CreateTestDict(l:test_dict,split(l:ts, '\.'))
+
+  let l:ts = "library.test_bench.test_case.other_use_case"
+  call s:CreateTestDict(l:test_dict,split(l:ts, '\.'))
+
+  let l:ts = "library.test_bench.test_ca.other_use_case.bla.blu.blo"
+  call s:CreateTestDict(l:test_dict,split(l:ts, '\.'))
+
+  let l:test_list = []
+  call s:CreateTestList(l:test_dict,l:test_list,"")
+  echomsg(string(l:test_dict))
+  echomsg(string(l:test_list))
+endfunction
+
+function! s:CreateTestDict(test_dict, split_test_string)
+
+  let l:test_dict = a:test_dict
+
+  if has_key(a:test_dict,a:split_test_string[0]) < 1
+    let l:test_dict[a:split_test_string[0]] = {}
+  endif
+
+  if len(a:split_test_string) > 1
+    call s:CreateTestDict(l:test_dict[a:split_test_string[0]],a:split_test_string[1:-1])
+  endif
+
+  return l:test_dict
+
+endfunction
+
+function! s:CreateTestList(test_dict, test_list, curr_name)
+  let l:test_list = a:test_list
+
+  if empty(a:test_dict)
+    call add(l:test_list, a:curr_name)
+  else
+
+    for [key, value] in items(a:test_dict)
+      if a:curr_name == ""
+        let l:curr_name = a:curr_name . key
+      else
+        let l:curr_name = a:curr_name . "." . key
+      endif
+      call s:CreateTestList(value, l:test_list, l:curr_name)
+    endfor
+
+    if len(a:test_dict)>1
+      call add(l:test_list, a:curr_name . ".*")
+    endif
+
+  endif
+
+  return l:test_list
+
 endfunction
 
 function! s:VhdlCreateVunitStarSelection(vunit_list)
-  let l:library = uniq(map(copy(a:vunit_list), function('StarFunc',[1])))
-  let l:testbench =  uniq(map(copy(a:vunit_list), function('StarFunc',[2])))
-  return l:library + l:testbench
+  let l:test_dict = {}
+
+  for test_string in a:vunit_list
+    let l:split_test_string = split(test_string,'\.')
+
+    if len(l:split_test_string) > 1
+      call s:CreateTestDict(l:test_dict,l:split_test_string)
+    endif
+
+  endfor
+
+  return s:CreateTestList(l:test_dict, [], "")
+
 endfunction
 
 function! s:VhdlGetTestList(job_id, data, event) dict
@@ -280,18 +349,14 @@ function! s:VhdlGetTestList(job_id, data, event) dict
     if a:data != ['']
       let g:vunit_test_list += a:data
     endif
-    call sort(g:vunit_test_list)
-    call uniq(g:vunit_test_list)
   elseif a:event == 'stderr'
     if a:data != ['']
       echomsg "stderr " . join(a:data, "\r\r")
-      let g:vunit_test_list += a:data
     endif
-    call sort(g:vunit_test_list)
-    call uniq(g:vunit_test_list)
   else
     call sort(g:vunit_test_list)
     call uniq(g:vunit_test_list)
+    let g:vunit_test_list = s:VhdlCreateVunitStarSelection(g:vunit_test_list)
   endif
 endfunction
 
@@ -304,23 +369,27 @@ function VhdlUpdateTestList()
         \ 'on_exit'  : function('s:VhdlGetTestList'),
         \ 'cwd'      : l:runpy["workdir"]
         \}
-  call jobstart(['vunit',  l:runpy["runpy"], '-l', '--log-level', 'error'], s:opts)
+  let g:vunit_update_test_list_job_id = jobstart(['vunit',  l:runpy["runpy"], '-l', '--log-level', 'error'], s:opts)
 endfunction
 
+function VhdlInitTestList()
+  if !exists("g:vunit_test_list")
+    call VhdlUpdateTestList()
+  endif
+endfunction
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-" Parameter guimode can be 0 for non gui mode or 1 for calling questa with 
+" Parameter guimode can be 0 for non gui mode or 1 for calling questa with
 " gui
 function VhdlRunTestWithFzf(guimode)
-  let l:list = []
-  let g:vunit_gui_mode = a:guimode 
-  if exists("g:vunit_test_list") 
-    let l:list = g:vunit_test_list + s:VhdlCreateVunitStarSelection(g:vunit_test_list)
+  let g:vunit_gui_mode = a:guimode
+  if exists("g:vunit_test_list")
+    call jobwait([g:vunit_update_test_list_job_id])
   else
-    return 
+    return
   endif
   if exists(":FZF")
     call fzf#run({
-          \ 'source': l:list,
+          \ 'source': g:vunit_test_list,
           \ 'options': '-m -d " " --with-nth 1',
           \ 'down' : '50%',
           \ 'sink*': function('VhdlRunVunitTest')})
@@ -332,6 +401,14 @@ function VhdlReRunSelectedTests()
 endfunction
 
 function VhdlRunVunitTest(tests)
+  if empty(a:tests)
+    return
+  endif
+  if exists("g:vunit_buf")
+    if bufexists(g:vunit_buf)
+      exec "bd!".g:vunit_buf
+    endif
+  endif
   let g:VhdlSelectedTests = a:tests
   let l:runpy = VhdlFindRootRunPy()
   let l:command = "export $(tmux show-env | grep DISP); vunit " . l:runpy["runpy"] . " \"" . join(a:tests, "\" ") . "\" -o nvim"
@@ -340,9 +417,12 @@ function VhdlRunVunitTest(tests)
   endif
   " reset g:vunit_gui_mode for next call
   let g:vunit_gui_mode = 0
-  bo new | resize 15 
+  bo new | resize 15
   call termopen(l:command, {'cwd': l:runpy["workdir"]})
   call cursor(100,0)
+  let g:vunit_buf = bufnr("%")
+  let g:vunit_win = winnr()
+  let g:vunit_tab = tabpagenr()
   wincmd p
 endfunction
 
