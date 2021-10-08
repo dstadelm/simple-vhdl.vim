@@ -1,12 +1,12 @@
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Abbreviations in insert mode
 "iabbr <buffer> --- 80i-<ESC>80|D<CR>--
-iabbr ,, <=
-iabbr .. =>
-iabbr dt downto
-iabbr toi to_integer
-iabbr tos to_signed
-iabbr tou to_unsigned
+iabbr <buffer> ,, <=
+iabbr <buffer> .. =>
+iabbr <buffer> dt downto
+iabbr <buffer> toi to_integer
+iabbr <buffer> tos to_signed
+iabbr <buffer> tou to_unsigned
 """"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 " Emacs call for
 " * beautify
